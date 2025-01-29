@@ -1,74 +1,77 @@
 const express = require('express');
 const bodyParser = require('body-parser');
+const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const mysql = require('mysql2');
 
 const app = express();
 const port = 5000;
 
-// Middleware to parse JSON request body
+// Middleware
 app.use(bodyParser.json());
+app.use(cors());
 
-// MySQL Connection Pool (Better for multiple requests)
+// MySQL Connection Pool
 const pool = mysql.createPool({
     host: 'localhost',
     user: 'root',
-    password: 'Dipti@2304', // replace with your MySQL password
+    password: 'Dipti@2304',  // Update with your actual password
     database: 'bluestock',
     waitForConnections: true,
-    connectionLimit: 10, // Limit concurrent connections
+    connectionLimit: 10,
     queueLimit: 0
 });
 
-// Signup route to handle the form submission
-app.post('/signup', (req, res) => {
-    console.log("Received data:", req.body);
+// Check MySQL Connection
+pool.getConnection((err, connection) => {
+    if (err) {
+        console.error("Database connection failed:", err);
+        process.exit(1);
+    } else {
+        console.log("Connected to MySQL Database.");
+        connection.release();
+    }
+});
+
+// Signup Route
+app.post('/signup', async (req, res) => {
+    console.log("Received signup request:", req.body);
+
     const { name, email, password } = req.body;
 
     if (!name || !email || !password) {
         return res.status(400).json({ success: false, message: 'All fields are required' });
     }
 
-    // Hash the password before saving to the database
-    bcrypt.hash(password, 10, (err, hashedPassword) => {
-        if (err) {
-            console.error("Error hashing password:", err);
-            return res.status(500).json({ success: false, message: 'Error hashing password' });
-        }
+    try {
+        // Hash password
+        const hashedPassword = await bcrypt.hash(password, 10);
 
-        // Insert user data into the database using a connection from the pool
+        // Insert user data into MySQL
         pool.getConnection((err, connection) => {
             if (err) {
-                console.error("Error getting connection:", err);
+                console.error("Database connection error:", err);
                 return res.status(500).json({ success: false, message: 'Database connection error' });
             }
 
             const query = 'INSERT INTO users (name, email, password) VALUES (?, ?, ?)';
+            
             connection.query(query, [name, email, hashedPassword], (err, result) => {
-                connection.release(); // Release connection after query execution
+                connection.release();
 
                 if (err) {
-                    console.error("Error inserting data into database:", err);
+                    console.error("Error inserting data:", err);
                     return res.status(500).json({ success: false, message: 'Error inserting data into database' });
                 }
 
-                console.log("User inserted with ID:", result.insertId);
+                console.log("User inserted:", result.insertId);
                 res.status(200).json({ success: true, message: 'User created successfully' });
             });
         });
-    });
-});
-
-// Gracefully close the connection pool when the server stops
-process.on('SIGINT', () => {
-    pool.end((err) => {
-        if (err) {
-            console.error("Error closing MySQL pool:", err);
-        } else {
-            console.log("MySQL pool closed.");
-        }
-        process.exit();
-    });
+    } catch (error) {
+        console.error("Error processing request:", error);
+        res.status(500).json({ success: false, message: 'Server error' });
+    }
 });
 
 // Start the server
